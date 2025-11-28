@@ -26,7 +26,7 @@ const controls=new OrbitControls(camera,renderer.domElement);
 //Scene Setup
 const scene = new THREE.Scene();
 const geometry=new THREE.BoxGeometry();
-const material = new THREE.MeshBasicMaterial({color: 0x7FFFD4})
+const material = new THREE.MeshLambertMaterial({color: 0x7FFFD4})
 const cube = new THREE.Mesh(geometry,material);
 scene.add(cube)
 
@@ -37,6 +37,24 @@ function animate(){
   renderer.render(scene,camera);
 }
 
+//Añadiendo Luz
+
+function setupLights(){
+  const light1= new THREE.DirectionalLight(0xFFDB58, 1);
+  light1.position.set(1,1,1);
+  scene.add(light1);
+
+  const light2= new THREE.DirectionalLight(0xFFFFFF, 2);
+  light2.position.set(-1,1,-0.5);
+  scene.add(light2);
+
+  const ambient= new THREE.AmbientLight();
+  ambient.intensity=0.1;
+  scene.add(ambient);
+}
+
+
+
 //Resize
 window.addEventListener('resize', () => {
   camera.aspect=window.innerWidth / window.innerHeight;
@@ -45,5 +63,5 @@ window.addEventListener('resize', () => {
 
 });
 
-
+setupLights();
 animate();
