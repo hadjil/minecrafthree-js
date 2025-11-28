@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
+import {World} from './world'
 ///REnder Setup
 const renderer = new THREE.WebGLRenderer();
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -27,27 +27,19 @@ controls.update();
 
 //Scene Setup
 const scene = new THREE.Scene();
-const geometry=new THREE.BoxGeometry();
-const material = new THREE.MeshLambertMaterial({color: 0x7FFFD4})
-
+const world =new World();
+world.generate();
+scene.add(world);
 
 //Render Loop
 function animate(){
   requestAnimationFrame(animate);
 
   renderer.render(scene,camera);
+  
 }
-//Crea un suelo
-function setupWorld(size){
-  for(let x=0; x< size; x++){
-      for(let z=0; z< size; z++){
-        const cube = new THREE.Mesh(geometry,material);
-        cube.position.set(x,0,z);
-        scene.add(cube)
 
-      }
-  }
-}
+
 
 //Añadiendo Luz
 function setupLights(){
@@ -75,5 +67,5 @@ window.addEventListener('resize', () => {
 });
 
 setupLights();
-setupWorld(30);
+
 animate();
