@@ -1,6 +1,13 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {World} from './world'
+import Stats from 'three/examples/jsm/libs/stats.module.js';
+
+//Stats
+const stats= new Stats();
+document.body.append(stats.dom);
+
+
 ///REnder Setup
 const renderer = new THREE.WebGLRenderer();
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -12,12 +19,12 @@ renderer.setClearColor(0x80a0e0);
 
 //Camera Setup
 const camera = new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight);
-camera.position.set(-32,16,-32);
+camera.position.set(-24,16,-24);
 camera.lookAt(0,0,0);
 
 //Orbit Controls
 const controls=new OrbitControls(camera,renderer.domElement);
-controls.target.set(16,0,16);
+controls.target.set(0,0,0);
 controls.update();
 
 
@@ -34,6 +41,7 @@ scene.add(world);
 //Render Loop
 function animate(){
   requestAnimationFrame(animate);
+  stats.update();
 
   renderer.render(scene,camera);
   
