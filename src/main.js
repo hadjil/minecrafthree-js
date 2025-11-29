@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {World} from './world'
 import Stats from 'three/examples/jsm/libs/stats.module.js';
-
+import { createUI } from './ui';
 //Stats
 const stats= new Stats();
 document.body.append(stats.dom);
@@ -75,5 +75,5 @@ window.addEventListener('resize', () => {
 });
 
 setupLights();
-
+createUI(world);
 animate();
