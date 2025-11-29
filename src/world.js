@@ -1,113 +1,46 @@
-import * as THREE from 'three'
-// Importación corregida para el add-on SimplexNoise
-import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js'; 
+import * as THREE from 'three';
+import { createNoise2D } from 'simplex-noise'; 
+import { RNG } from './rng';
+import { blocks } from './blocks'; // Asume que 'blocks' contiene {empty: {id: 0, ...}, grass: {id: 1, color: 0x...}, ...}
 
-const geometry = new THREE.BoxGeometry(1, 1, 1); // Asegura que el tamaño sea 1 para coordenadas enteras
-// Usamos MeshLambertMaterial para un aspecto estilo voxel simple si tienes luces, o MeshStandardMaterial si usas luces más modernas
-const material = new THREE.MeshLambertMaterial({ color: 0x7FFFD4 }) 
+// 🧱 Definición de la Geometría Base (Deben estar disponibles en el scope)
+const geometry = new THREE.BoxGeometry(1, 1, 1); 
+const material = new THREE.MeshLambertMaterial({ color: 0x7FFFD4 });
 
 export class World extends THREE.Group {
-    /** * @type{{id:number,instanceId:number | null}[][][]}
-     * */
-    data = []; // Inicializamos como array vacío, se llenará en initializeTerrain
+    data = []; 
 
     params = {
         terrain: {
-            scale: 30,
+            seed: 0,
+            scale: 30, 
             magnitude: 0.5,
             offset: 0.2
         }
     }
-    threshold = 0.5;
     
-    /**
-     * @param {object} [size] - Dimensiones del mundo.
-     * @param {number} [size.width] - Ancho (X y Z).
-     * @param {number} [size.height] - Altura (Y).
-     */
     constructor(size = { width: 8, height: 16 }) {
         super();
         this.size = size;
     }
 
-    /**
-     * Obtiene los datos del bloque en las coordenadas (x,y,z).
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @returns{{id:number,instanceId:number | null} | null}
-     */
-    getBlock(x, y, z) { 
-        if (this.inBounds(x, y, z)) { 
-            // Acceso seguro asumiendo que data está correctamente inicializada
-            return this.data[x][y][z]; 
-        } else {
-            return null;
-        }
-    }
-
-    /**
-     * Establece el instanceId del bloque en las coordenadas (x,y,z).
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @param {number | null} instanceId
-     */
-    setBlockInstanceId(x, y, z, instanceId) {
-        if (this.inBounds(x, y, z)) {
-            // Se asume que el objeto bloque existe ya
-            this.data[x][y][z].instanceId = instanceId; 
-        }
-    }
-
-    /**
-     * Establece el ID del bloque en las coordenadas (x,y,z).
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @param {number} id
-     */
-    setBlockId(x, y, z, id) {
-        if (this.inBounds(x, y, z)) {
-            // Se asume que el objeto bloque existe ya
-            this.data[x][y][z].id = id; 
-        }
-    }
-
-    /**
-     * Verifica si las coordenadas están dentro de los límites del mundo.
-     * @param {number} x
-     * @param {number} y
-     * @param {number} z
-     * @returns {boolean}
-     */
-    inBounds(x, y, z) { 
-        return (
-            x >= 0 && x < this.size.width && 
-            y >= 0 && y < this.size.height && 
-            z >= 0 && z < this.size.width // Asumiendo Z usa width
-        );
-    }
-
-    // Método principal para generar el mundo
+    // 🚀 generate: Orquesta los pasos
     generate() {
-        this.initializeTerrain(); // **IMPORTANTE: Inicializar la estructura de datos**
-        this.generateTerrain();
-        this.generateMeshes();
+        this.initializeTerrain(); 
+        this.generateTerrain();  
+        this.generateMeshes();   
     }
 
-    /**
-     * Inicializa la matriz 3D 'data' con bloques predeterminados (generalmente aire: id 0).
-     */
+    // 💾 initializeTerrain: Crea la estructura de datos vacía
     initializeTerrain() {
-        this.data = []; // Reinicia la data
+        this.data = []; 
         for (let x = 0; x < this.size.width; x++) {
             const slice = [];
             for (let y = 0; y < this.size.height; y++) {
                 const row = [];
                 for (let z = 0; z < this.size.width; z++) { 
                     row.push({
-                        id: 0, // 0 = Aire (o bloque transparente/vacío)
+                        id: blocks.empty.id,
                         instanceId: null
                     });
                 }
@@ -117,79 +50,177 @@ export class World extends THREE.Group {
         }
     }
 
-    /**
-     * Genera el terreno usando ruido de Simplex.
-     */
+    // 🏔️ generateTerrain: Calcula elevaciones y llena los datos
     generateTerrain() {
-        // CORREGIDO: El import de SimplexNoise en Three.js ha cambiado.
-        // Asegúrate de que el path sea correcto en tu entorno.
-        const simplex = new SimplexNoise(); 
+        const rng = new RNG(this.params.seed);
+        const noise2D = createNoise2D(rng.random.bind(rng)); 
 
-        // Los bucles X y Z deben ir juntos para calcular la altura
         for (let x = 0; x < this.size.width; x++) {
-            for (let z = 0; z < this.size.width; z++) { // Bucle Z movido aquí
+            for (let z = 0; z < this.size.width; z++) {
 
-                const value = simplex.noise(
-                    x / this.params.terrain.scale,
+                const value = noise2D(
+                    x / this.params.terrain.scale, 
                     z / this.params.terrain.scale
                 );
 
-                // Cálculo de la altura basada en el ruido
                 const scaledNoise = this.params.terrain.offset + this.params.terrain.magnitude * value;
-
                 let height = this.size.height * scaledNoise;
-                // Ajusta la altura para que esté dentro de los límites [0, this.size.height]
+                
                 height = Math.max(0, Math.min(Math.floor(height), this.size.height - 1));
 
-                // Bucle Y: Establece los bloques hasta la altura calculada
                 for (let y = 0; y <= height; y++) {
-                    // **CORREGIDO: Usar setBlockId para establecer el tipo de bloque (id)**
-                    this.setBlockId(x, y, z, 1); // 1 = Bloque de tierra (o el tipo que uses)
+                    if (y < height) {
+                        this.setBlockId(x, y, z, blocks.dirt.id);
+                    } else if (y === height) {
+                        this.setBlockId(x, y, z, blocks.grass.id);
+                    } else {
+                        this.setBlockId(x, y, z, blocks.empty.id);
+                    }
                 }
-
             }
         }
     }
 
-    /**
-     * Crea la malla instanciada a partir de los datos del terreno.
-     */
+    // 🖼️ generateMeshes: Renderizado eficiente con Culling
     generateMeshes() {
-        this.clear(); 
+        this.clear();
 
-        const MaxCount = this.size.width * this.size.width * this.size.height;
-        const mesh = new THREE.InstancedMesh(geometry, material, MaxCount);
+        const maxCount = this.size.width * this.size.width * this.size.height;
+        const mesh = new THREE.InstancedMesh(geometry, material, maxCount);
         mesh.count = 0;
-
-        const matrix = new THREE.Matrix4();
+        mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(maxCount * 3), 3);
         
+        const matrix = new THREE.Matrix4();
+        const color = new THREE.Color();
+        const blockTypes = Object.values(blocks); 
+
         for (let x = 0; x < this.size.width; x++) {
             for (let y = 0; y < this.size.height; y++) {
                 for (let z = 0; z < this.size.width; z++) {
                     
-                    const block = this.getBlock(x, y, z); 
+                    const blockData = this.getBlock(x, y, z); 
+                    const blockId = blockData.id;
+                    const instanceId = mesh.count;
 
-                    // Solo crear malla si el bloque existe y no es aire (id !== 0)
-                    if (block && block.id !== 0) {
-                        // Posiciona la caja de 1x1x1. El +0.5 es correcto para centrarla en coordenadas enteras.
-                        matrix.setPosition(x + 0.5, y + 0.5, z + 0.5); 
+                    // 🎯 LÓGICA DE OPTIMIZACIÓN IMPLEMENTADA:
+                    // Renderiza si NO es aire Y NO está completamente oculto.
+                    if (blockId !== blocks.empty.id && !this.isBlockObscured(x, y, z)) {
                         
-                        // Aplica la matriz
-                        mesh.setMatrixAt(mesh.count, matrix);
-                        
-                        // Guarda el instanceId en los datos del mundo
-                        this.setBlockInstanceId(x, y, z, mesh.count); 
+                        // a) Posición
+                        matrix.setPosition(x + 0.5, y + 0.5, z + 0.5);
+                        mesh.setMatrixAt(instanceId, matrix);
 
-                        // Incrementa el contador 
+                        // b) Color
+                        const blockType = blockTypes.find(b => b.id === blockId);
+                        
+                        if (blockType && blockType.color) {
+                                color.set(blockType.color);
+                        } else {
+                                color.set(0xaaaaaa); 
+                        }
+                        mesh.setColorAt(instanceId, color); 
+                        
+                        // c) Actualizar datos internos
+                        this.setBlockInstanceId(x, y, z, instanceId);
+
                         mesh.count++;
                     }
                 }
             }
         }
         
-        // Finaliza y actualiza la matriz de instancias
         mesh.instanceMatrix.needsUpdate = true;
-        
+        mesh.instanceColor.needsUpdate = true;
+
         this.add(mesh);
+    }
+
+    // --- Métodos de Acceso y Optimización ---
+
+    /**
+     * @returns {object | null} El objeto del bloque en (x, y, z) o null si está fuera de límites.
+     */
+    getBlock(x, y, z) { 
+        if (this.inBounds(x, y, z)) { 
+            return this.data[x][y][z]; 
+        } else {
+            return null;
+        }
+    }
+
+    setBlockId(x, y, z, id) {
+        if (this.inBounds(x, y, z)) {
+            this.data[x][y][z].id = id; 
+        }
+    }
+
+    setBlockInstanceId(x, y, z, instanceId) {
+        if (this.inBounds(x, y, z)) {
+            this.data[x][y][z].instanceId = instanceId; 
+        }
+    }
+
+    /**
+     * @returns {boolean} True si las coordenadas están dentro de los límites del mundo.
+     */
+    inBounds(x, y, z) { 
+        return (
+            x >= 0 && x < this.size.width && 
+            y >= 0 && y < this.size.height && 
+            z >= 0 && z < this.size.width
+        );
+    }
+
+    /**
+     * **(Función de la imagen)** Devuelve true si el bloque está completamente rodeado
+     * por otros bloques (ninguna de sus 6 caras toca un bloque vacío).
+     * @param {number} x Coordenada X.
+     * @param {number} y Coordenada Y.
+     * @param {number} z Coordenada Z.
+     * @returns {boolean} True si está oculto, false si al menos una cara está expuesta.
+     */
+    isBlockObscured(x, y, z) {
+        // Obtenemos el ID que representa un bloque vacío/aire
+        const EMPTY_ID = blocks.empty.id;
+
+        // Intentamos obtener el ID del bloque vecino. Si el bloque no existe (fuera de límites), 
+        // asumimos que es EMPTY_ID para que siempre parezca expuesto.
+        const up      = this.getBlock(x, y + 1, z)?.id ?? EMPTY_ID;
+        const down    = this.getBlock(x, y - 1, z)?.id ?? EMPTY_ID;
+        const left    = this.getBlock(x + 1, y, z)?.id ?? EMPTY_ID;
+        const right   = this.getBlock(x - 1, y, z)?.id ?? EMPTY_ID;
+        const forward = this.getBlock(x, y, z + 1)?.id ?? EMPTY_ID;
+        const back    = this.getBlock(x, y, z - 1)?.id ?? EMPTY_ID;
+        
+        // Si cualquiera de los vecinos es aire (EMPTY_ID), significa que una cara está expuesta.
+        // Por lo tanto, el bloque NO está oculto.
+        if (up      === EMPTY_ID ||
+            down    === EMPTY_ID ||
+            left    === EMPTY_ID ||
+            right   === EMPTY_ID ||
+            forward === EMPTY_ID ||
+            back    === EMPTY_ID) 
+        {
+            return false; 
+        } 
+        
+        // Si llegamos aquí, todos los vecinos son bloques sólidos. El bloque SÍ está oculto.
+        return true; 
+    }
+
+    /**
+     * Método alternativo que devuelve un objeto indicando qué caras están expuestas (útil para future Face Culling)
+     */
+    getExposedFaces(x, y, z) {
+        const EMPTY_ID = blocks.empty.id;
+        
+        return {
+            up:      this.getBlock(x, y + 1, z)?.id === EMPTY_ID,
+            down:    this.getBlock(x, y - 1, z)?.id === EMPTY_ID,
+            left:    this.getBlock(x + 1, y, z)?.id === EMPTY_ID,
+            right:   this.getBlock(x - 1, y, z)?.id === EMPTY_ID,
+            forward: this.getBlock(x, y, z + 1)?.id === EMPTY_ID,
+            back:    this.getBlock(x, y, z - 1)?.id === EMPTY_ID
+        };
     }
 }

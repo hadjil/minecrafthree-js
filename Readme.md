@@ -1,6 +1,6 @@
 ## npm create vite@latest
 ## npm install --save three
-
+##  npm install simplex-noise
 
 ![alt text](image.png)
 
