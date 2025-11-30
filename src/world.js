@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise'; 
 import { RNG } from './rng';
 import { blocks } from './blocks'; // Asume que 'blocks' contiene {empty: {id: 0, ...}, grass: {id: 1, color: 0x...}, ...}
+import { SimplexNoise } from 'three/examples/jsm/Addons.js';
 
 // 🧱 Definición de la Geometría Base (Deben estar disponibles en el scope)
 const geometry = new THREE.BoxGeometry(1, 1, 1); 
@@ -26,9 +27,11 @@ export class World extends THREE.Group {
 
     // 🚀 generate: Orquesta los pasos
     generate() {
-        this.initializeTerrain(); 
-        this.generateTerrain();  
-        this.generateMeshes();   
+     const rng = new RNG(this.params.seed);
+        this.initializeTerrain();
+        this.generateResources(rng); 
+       // this.generateTerrain(rng);  
+        this.generateMeshes();
     }
 
     // 💾 initializeTerrain: Crea la estructura de datos vacía
@@ -50,9 +53,25 @@ export class World extends THREE.Group {
         }
     }
 
+    generateResources(rng){
+        const simplex =new SimplexNoise(rng);
+         for (let x = 0; x < this.size.width; x++) {
+            for (let y = 0; y < this.size.height; y++) {
+                for (let z = 0; z < this.size.width; z++) { 
+                const value= simplex.noise3d(x/30,y/30,z/30);
+                if(value>0.5){
+                    this.setBlockId(x,y,z,blocks.stone.id);
+                }
+            
+                }
+             }
+            }
+        }
+
+    
+
     // 🏔️ generateTerrain: Calcula elevaciones y llena los datos
-    generateTerrain() {
-        const rng = new RNG(this.params.seed);
+    generateTerrain(rng) {
         const noise2D = createNoise2D(rng.random.bind(rng)); 
 
         for (let x = 0; x < this.size.width; x++) {
