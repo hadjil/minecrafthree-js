@@ -1,51 +1,121 @@
 import * as THREE from 'three';
-import { createNoise2D } from 'simplex-noise'; 
-import { RNG } from './rng';
-import { blocks } from './blocks'; // Asume que 'blocks' contiene {empty: {id: 0, ...}, grass: {id: 1, color: 0x...}, ...}
-import { SimplexNoise } from 'three/examples/jsm/Addons.js';
-
-// 🧱 Definición de la Geometría Base (Deben estar disponibles en el scope)
-const geometry = new THREE.BoxGeometry(1, 1, 1); 
-const material = new THREE.MeshLambertMaterial({ color: 0x7FFFD4 });
+import RNG from './rng'; 
+import { blocks } from './blocks'; 
+import { TerrainGenerator } from './TerrainGenerator';
+import { TextureFactory } from './TextureFactory'; 
 
 export class World extends THREE.Group {
-    data = []; 
-
+    data = [];
+    
+    // Geometría base
+    blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+    
+    // MATERIAL OPTIMIZADO: Lambert con soporte para Atlas
+    defaultMaterial = new THREE.MeshLambertMaterial({ 
+        map: null, 
+        side: THREE.FrontSide
+    });
+    
+    instancedMesh = null;
+    dummy = new THREE.Object3D(); 
+    
+    // 🔥 Se eliminan las variables de Frustum Culling (frustum, blockBox, blockCenter)
+    
     params = {
         terrain: {
-            seed: 0,
-            scale: 30, 
-            magnitude: 0.5,
-            offset: 0.2
+            seed: 0, scale: 30, magnitude: 0.5, offset: 0.2,
+            dirtLayerThickness: 3, rockOutcropProbability: 0.1
         }
     }
-    
+
     constructor(size = { width: 8, height: 16 }) {
         super();
         this.size = size;
+
+        // 1. GENERAR TEXTURA PROCEDURAL (Hybrid Atlas)
+        const { texture, blockCount } = TextureFactory.generateTextureAtlas();
+        this.defaultMaterial.map = texture;
+
+        // 2. SHADER INJECTION: Modificar el material para mapear la textura por cara
+        this.defaultMaterial.onBeforeCompile = (shader) => {
+            shader.uniforms.atlasSize = { value: blockCount };
+            
+            // Vertex Shader: Recibir atributos y pasar VARYINGs
+            shader.vertexShader = `
+                attribute float blockType;
+                varying float vBlockType;
+                varying vec2 vUv;
+                varying vec3 vNormalWorld; 
+
+                ${shader.vertexShader}
+            `.replace(
+                '#include <begin_vertex>',
+                `
+                #include <begin_vertex>
+                vBlockType = blockType;
+                vUv = uv;
+                vNormalWorld = normalize( mat3( instanceMatrix ) * normal ); 
+                `
+            );
+
+            // Fragment Shader: Lógica para forzar la tapa verde
+            shader.fragmentShader = `
+                uniform float atlasSize;
+                varying float vBlockType;
+                varying vec2 vUv; 
+                varying vec3 vNormalWorld;
+                
+                const float GRASS_PURE_ID = 1.0; 
+
+                ${shader.fragmentShader}
+            `.replace(
+                '#include <map_fragment>',
+                `
+                // 1. Decidir qué ID de textura base usar (por defecto el ID del bloque)
+                float targetBlockId = vBlockType;
+                
+                // 2. Comprobar si es la cara superior (Normal Y positiva)
+                if (dot(vNormalWorld, vec3(0.0, 1.0, 0.0)) > 0.9) { 
+                    if (vBlockType != 0.0) { 
+                        targetBlockId = GRASS_PURE_ID;
+                    }
+                } 
+                
+                // 3. Aplicar el mapeo del Atlas (usando el ID decidido por la cara)
+                vec2 atlasUV = vUv;
+                
+                float row = atlasSize - 1.0 - targetBlockId; 
+                
+                atlasUV.y /= atlasSize; 
+                atlasUV.y += (row / atlasSize);
+
+                vec4 sampledDiffuseColor = texture2D( map, atlasUV );
+                diffuseColor *= sampledDiffuseColor;
+                `
+            );
+        };
+
+        const rng = new RNG(this.params.terrain.seed);
+        this.generator = new TerrainGenerator(rng.random.bind(rng), this.params);
     }
 
-    // 🚀 generate: Orquesta los pasos
+// --- Métodos de la clase ---
+
     generate() {
-     const rng = new RNG(this.params.seed);
-        this.initializeTerrain();
-        this.generateResources(rng); 
-       // this.generateTerrain(rng);  
+        this.dispose();
+        this.initDataStructure();
+        this.generator.generate(this.data, this.size);
         this.generateMeshes();
     }
 
-    // 💾 initializeTerrain: Crea la estructura de datos vacía
-    initializeTerrain() {
-        this.data = []; 
+    initDataStructure() {
+        this.data = [];
         for (let x = 0; x < this.size.width; x++) {
             const slice = [];
             for (let y = 0; y < this.size.height; y++) {
                 const row = [];
-                for (let z = 0; z < this.size.width; z++) { 
-                    row.push({
-                        id: blocks.empty.id,
-                        instanceId: null
-                    });
+                for (let z = 0; z < this.size.width; z++) {
+                    row.push({ id: blocks.empty.id, instanceId: null });
                 }
                 slice.push(row);
             }
@@ -53,193 +123,86 @@ export class World extends THREE.Group {
         }
     }
 
-    generateResources(rng){
-        const simplex =new SimplexNoise(rng);
-         for (let x = 0; x < this.size.width; x++) {
-            for (let y = 0; y < this.size.height; y++) {
-                for (let z = 0; z < this.size.width; z++) { 
-                const value= simplex.noise3d(x/30,y/30,z/30);
-                if(value>0.5){
-                    this.setBlockId(x,y,z,blocks.stone.id);
-                }
-            
-                }
-             }
-            }
-        }
-
-    
-
-    // 🏔️ generateTerrain: Calcula elevaciones y llena los datos
-    generateTerrain(rng) {
-        const noise2D = createNoise2D(rng.random.bind(rng)); 
-
-        for (let x = 0; x < this.size.width; x++) {
-            for (let z = 0; z < this.size.width; z++) {
-
-                const value = noise2D(
-                    x / this.params.terrain.scale, 
-                    z / this.params.terrain.scale
-                );
-
-                const scaledNoise = this.params.terrain.offset + this.params.terrain.magnitude * value;
-                let height = this.size.height * scaledNoise;
-                
-                height = Math.max(0, Math.min(Math.floor(height), this.size.height - 1));
-
-                for (let y = 0; y <= height; y++) {
-                    if (y < height) {
-                        this.setBlockId(x, y, z, blocks.dirt.id);
-                    } else if (y === height) {
-                        this.setBlockId(x, y, z, blocks.grass.id);
-                    } else {
-                        this.setBlockId(x, y, z, blocks.empty.id);
-                    }
-                }
-            }
-        }
-    }
-
-    // 🖼️ generateMeshes: Renderizado eficiente con Culling
+    /**
+     * Genera la InstancedMesh con Face Culling.
+     */
     generateMeshes() {
-        this.clear();
+        let count = 0;
+        for (let x = 0; x < this.size.width; x++) {
+            for (let y = 0; y < this.size.height; y++) {
+                for (let z = 0; z < this.size.width; z++) {
+                    if (!this.isBlockObscured(x, y, z)) count++;
+                }
+            }
+        }
 
-        const maxCount = this.size.width * this.size.width * this.size.height;
-        const mesh = new THREE.InstancedMesh(geometry, material, maxCount);
-        mesh.count = 0;
-        mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(maxCount * 3), 3);
+        if (count === 0) return;
+
+        this.instancedMesh = new THREE.InstancedMesh(this.blockGeometry, this.defaultMaterial, count);
+        this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         
-        const matrix = new THREE.Matrix4();
-        const color = new THREE.Color();
-        const blockTypes = Object.values(blocks); 
-
+        this.instancedMesh.castShadow = true;   
+        this.instancedMesh.receiveShadow = true; 
+        
+        const blockTypes = new Float32Array(count); 
+        this.instancedMesh.geometry.setAttribute('blockType', new THREE.InstancedBufferAttribute(blockTypes, 1));
+        
+        let i = 0;
         for (let x = 0; x < this.size.width; x++) {
             for (let y = 0; y < this.size.height; y++) {
                 for (let z = 0; z < this.size.width; z++) {
                     
-                    const blockData = this.getBlock(x, y, z); 
-                    const blockId = blockData.id;
-                    const instanceId = mesh.count;
-
-                    // 🎯 LÓGICA DE OPTIMIZACIÓN IMPLEMENTADA:
-                    // Renderiza si NO es aire Y NO está completamente oculto.
-                    if (blockId !== blocks.empty.id && !this.isBlockObscured(x, y, z)) {
-                        
-                        // a) Posición
-                        matrix.setPosition(x + 0.5, y + 0.5, z + 0.5);
-                        mesh.setMatrixAt(instanceId, matrix);
-
-                        // b) Color
-                        const blockType = blockTypes.find(b => b.id === blockId);
-                        
-                        if (blockType && blockType.color) {
-                                color.set(blockType.color);
-                        } else {
-                                color.set(0xaaaaaa); 
-                        }
-                        mesh.setColorAt(instanceId, color); 
-                        
-                        // c) Actualizar datos internos
-                        this.setBlockInstanceId(x, y, z, instanceId);
-
-                        mesh.count++;
+                    const blockData = this.data[x][y][z];
+                    
+                    if (this.isBlockObscured(x, y, z)) {
+                        blockData.instanceId = null;
+                        continue;
                     }
+
+                    this.dummy.position.set(x, y, z);
+                    this.dummy.updateMatrix();
+                    this.instancedMesh.setMatrixAt(i, this.dummy.matrix);
+
+                    blockTypes[i] = blockData.id;
+
+                    blockData.instanceId = i;
+                    i++;
                 }
             }
         }
         
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.instanceColor.needsUpdate = true;
-
-        this.add(mesh);
+        this.add(this.instancedMesh);
     }
 
-    // --- Métodos de Acceso y Optimización ---
-
-    /**
-     * @returns {object | null} El objeto del bloque en (x, y, z) o null si está fuera de límites.
-     */
-    getBlock(x, y, z) { 
-        if (this.inBounds(x, y, z)) { 
-            return this.data[x][y][z]; 
-        } else {
-            return null;
-        }
-    }
-
-    setBlockId(x, y, z, id) {
-        if (this.inBounds(x, y, z)) {
-            this.data[x][y][z].id = id; 
-        }
-    }
-
-    setBlockInstanceId(x, y, z, instanceId) {
-        if (this.inBounds(x, y, z)) {
-            this.data[x][y][z].instanceId = instanceId; 
-        }
-    }
-
-    /**
-     * @returns {boolean} True si las coordenadas están dentro de los límites del mundo.
-     */
-    inBounds(x, y, z) { 
-        return (
-            x >= 0 && x < this.size.width && 
-            y >= 0 && y < this.size.height && 
-            z >= 0 && z < this.size.width
-        );
-    }
-
-    /**
-     * **(Función de la imagen)** Devuelve true si el bloque está completamente rodeado
-     * por otros bloques (ninguna de sus 6 caras toca un bloque vacío).
-     * @param {number} x Coordenada X.
-     * @param {number} y Coordenada Y.
-     * @param {number} z Coordenada Z.
-     * @returns {boolean} True si está oculto, false si al menos una cara está expuesta.
-     */
     isBlockObscured(x, y, z) {
-        // Obtenemos el ID que representa un bloque vacío/aire
-        const EMPTY_ID = blocks.empty.id;
+        const block = this.getBlock(x, y, z);
+        if (!block || block.id === blocks.empty.id) return true;
 
-        // Intentamos obtener el ID del bloque vecino. Si el bloque no existe (fuera de límites), 
-        // asumimos que es EMPTY_ID para que siempre parezca expuesto.
-        const up      = this.getBlock(x, y + 1, z)?.id ?? EMPTY_ID;
-        const down    = this.getBlock(x, y - 1, z)?.id ?? EMPTY_ID;
-        const left    = this.getBlock(x + 1, y, z)?.id ?? EMPTY_ID;
-        const right   = this.getBlock(x - 1, y, z)?.id ?? EMPTY_ID;
-        const forward = this.getBlock(x, y, z + 1)?.id ?? EMPTY_ID;
-        const back    = this.getBlock(x, y, z - 1)?.id ?? EMPTY_ID;
-        
-        // Si cualquiera de los vecinos es aire (EMPTY_ID), significa que una cara está expuesta.
-        // Por lo tanto, el bloque NO está oculto.
-        if (up      === EMPTY_ID ||
-            down    === EMPTY_ID ||
-            left    === EMPTY_ID ||
-            right   === EMPTY_ID ||
-            forward === EMPTY_ID ||
-            back    === EMPTY_ID) 
-        {
-            return false; 
-        } 
-        
-        // Si llegamos aquí, todos los vecinos son bloques sólidos. El bloque SÍ está oculto.
-        return true; 
+        if (y === this.size.height - 1) return false;
+
+        const check = (dx, dy, dz) => {
+            const n = this.getBlock(x + dx, y + dy, z + dz);
+            return n && n.id !== blocks.empty.id;
+        };
+
+        // Verifica si está rodeado en los 6 lados (Face Culling)
+        return check(0,1,0) && check(0,-1,0) && check(1,0,0) && check(-1,0,0) && check(0,0,1) && check(0,0,-1);
     }
 
-    /**
-     * Método alternativo que devuelve un objeto indicando qué caras están expuestas (útil para future Face Culling)
-     */
-    getExposedFaces(x, y, z) {
-        const EMPTY_ID = blocks.empty.id;
-        
-        return {
-            up:      this.getBlock(x, y + 1, z)?.id === EMPTY_ID,
-            down:    this.getBlock(x, y - 1, z)?.id === EMPTY_ID,
-            left:    this.getBlock(x + 1, y, z)?.id === EMPTY_ID,
-            right:   this.getBlock(x - 1, y, z)?.id === EMPTY_ID,
-            forward: this.getBlock(x, y, z + 1)?.id === EMPTY_ID,
-            back:    this.getBlock(x, y, z - 1)?.id === EMPTY_ID
-        };
+    // 🔥 ELIMINAMOS el método cullByFrustum.
+
+    dispose() {
+        if (this.instancedMesh) {
+            this.instancedMesh.geometry.dispose();
+            this.remove(this.instancedMesh);
+            this.instancedMesh = null;
+        }
+    }
+
+    getBlock(x, y, z) {
+        if (x >= 0 && x < this.size.width && y >= 0 && y < this.size.height && z >= 0 && z < this.size.width) {
+            return this.data[x][y][z];
+        }
+        return null;
     }
 }
