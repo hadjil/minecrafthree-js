@@ -1,11 +1,13 @@
 // TextureFactory.ts
 
 import * as THREE from 'three';
-import { blocks } from './blocks';
+import { blocks } from './blocks'; // Asumo que 'blocks' contiene la definición de colores e IDs
 
 export class TextureFactory {
     static generateTextureAtlas() {
         const canvas = document.createElement('canvas');
+        // Usar un canvas más grande (e.g., 256x256) es a menudo mejor para mipmaps
+        // Pero mantendremos el tamaño original para tu configuración: 32 x (número de bloques)
         const ctx = canvas.getContext('2d', { willReadFrequently: true }); 
         
         const blockSize = 32;
@@ -13,6 +15,10 @@ export class TextureFactory {
         
         canvas.width = blockSize;
         canvas.height = blockSize * blockCount;
+
+        // ⚠️ Nota: Una pequeña línea de margen (padding) entre bloques en el atlas 
+        // y el ajuste de UVs en tu código de geometría es la mejor defensa contra 
+        // artefactos de "costura". Aquí solo podemos arreglar el filtro.
 
         Object.values(blocks).forEach((block) => {
             const y = block.id * blockSize;
@@ -40,8 +46,17 @@ export class TextureFactory {
         });
 
         const texture = new THREE.CanvasTexture(canvas);
-        texture.magFilter = THREE.NearestFilter; 
-        texture.minFilter = THREE.NearestFilter;
+        
+        // 🚀 OPTIMIZACIÓN DE RENDIMIENTO Y CALIDAD DE PIXELADO
+        texture.magFilter = THREE.NearestFilter; // Mantiene los píxeles grandes de cerca
+        
+        // ✅ CORRECCIÓN: Usar Mipmaps para la distancia (reduce artefactos de costura y aliasing).
+        texture.minFilter = THREE.NearestMipmapNearestFilter; 
+        
+        // Generar Mipmaps y actualizar la textura para que Three.js los use
+        texture.generateMipmaps = true;
+        texture.needsUpdate = true;
+        
         texture.colorSpace = THREE.SRGBColorSpace;
         
         return { texture, blockSize, blockCount };
